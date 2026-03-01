@@ -1,4 +1,7 @@
 import { useState } from "react";
+import GooglePlacesAutocomplete from "react-google-places-autocomplete";
+import SignIn from "../components/SignIn";
+import axios from "axios";
 
 const budgetOptions = [
   { label: "Cheap", desc: "Around 25k to 50k PKR", icon: "💰" },
@@ -29,6 +32,7 @@ const destinations = [
 ];
 
 const SelectionCard = ({ icon, label, desc, selected, onClick }) => (
+
   <div
     onClick={onClick}
     className={`flex flex-col items-start gap-1 p-4 rounded-2xl border-2 cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md
@@ -53,6 +57,36 @@ const CreateTrip = () => {
   const [destOpen, setDestOpen] = useState(false);
   const [selectedDest, setSelectedDest] = useState(null);
 
+  const [openDialog, setOpenDialog] = useState(false);
+  
+
+  const generateTrip = ()=>{
+
+    const user = localStorage.getItem("user");
+    if(!user){
+      setOpenDialog(true)
+      return;
+    }
+  }
+
+  const getUserProfile = async (tokenInfo)=>{
+    axios.get(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${tokenInfo.access_token}`, {
+      headers: {
+        Authorization: `Bearer ${tokenInfo.access_token}`,
+        },
+    }).then((res)=>{
+      console.log("User Info:", res.data);
+      localStorage.setItem("user", JSON.stringify(res.data));
+    }).catch((err)=>{
+      console.error("Failed to fetch user info:", err);
+    });
+
+    setOpenDialog(false)
+    generateTrip();
+
+  }
+
+  
   const [daysOpen, setDaysOpen] = useState(false);
   const [selectedDays, setSelectedDays] = useState(null);
   const [selectedBudget, setSelectedBudget] = useState(null);
@@ -95,19 +129,11 @@ const CreateTrip = () => {
             </label>
             <div className="relative">
               {/* Input */}
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 text-base pointer-events-none">🔍</span>
-                <input
-                  type="text"
-                  value={selectedDest ? selectedDest.name : destQuery}
-                  onChange={(e) => { setDestQuery(e.target.value); setSelectedDest(null); setDestOpen(true); }}
-                  onFocus={() => setDestOpen(true)}
-                  onBlur={() => setTimeout(() => setDestOpen(false), 150)}
-                  placeholder="Search a destination…"
-                  className="w-full pl-9 pr-10 py-3 rounded-xl border border-slate-200 text-slate-700 text-sm placeholder-slate-300 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 focus:bg-white transition-all duration-200"
-                />
-                <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs transition-transform duration-200 ${destOpen ? "rotate-180" : ""}`}>▾</span>
-              </div>
+              <div>
+                <GooglePlacesAutocomplete 
+                  apiKey=""
+                  />                
+          </div>
 
               {/* Dropdown */}
               {destOpen && (
@@ -223,9 +249,14 @@ const CreateTrip = () => {
           <div className="h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
 
           {/* Generate Button */}
-          <button className="w-full cursor-pointer py-4 rounded-2xl bg-gradient-to-r from-indigo-500 to-sky-500 text-white font-semibold text-base tracking-wide shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200">
+          <button onClick={getUserProfile} className="w-full cursor-pointer py-4 rounded-2xl bg-gradient-to-r from-indigo-500 to-sky-500 text-white font-semibold text-base tracking-wide shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200">
             ✨ Generate My Itinerary
           </button>
+          <SignIn
+          open={openDialog}
+          onClose={() => setOpenDialog(false)}
+          
+          />
         </div>
 
         <p className="text-center text-xs text-slate-400 mt-5">

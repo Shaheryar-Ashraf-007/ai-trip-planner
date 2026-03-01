@@ -1,10 +1,7 @@
-import React from "react";
 import HeroSection from "./HeroSection";
-import { useNavigate } from "react-router";
 
 const Navbar = () => {
 
-  const navigate = useNavigate()
   return (
     <>
       {/* Navbar */}
@@ -24,16 +21,14 @@ const Navbar = () => {
         </div>
 
         {/* Menu */}
-        <div className="flex items-center gap-6 font-medium" onClick={()=>navigate("/sign-in")}>
+        <div className="flex items-center gap-6 font-medium">
           <button className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
             Login
           </button>
         </div>
 
-      </nav>
 
-      {/* Hero Section (outside navbar) */}
-      <HeroSection />
+      </nav>
     </>
   );
 };

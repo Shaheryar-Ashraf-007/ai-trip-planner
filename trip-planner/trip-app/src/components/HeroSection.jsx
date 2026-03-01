@@ -1,5 +1,4 @@
-import React from 'react'
-import { useNavigate } from 'react-router'
+import { Link } from "react-router-dom"
 
 const HeroSection = () => {
   const destinations = ['🗼 Paris', '🏯 Kyoto', '🏝 Bali', '🌆 NYC', '🏔 Swiss Alps', '🕌 Istanbul']
@@ -11,7 +10,6 @@ const HeroSection = () => {
     { num: '100%', label: 'Free to Start', icon: '🎉' },
   ]
 
-  const navigate = useNavigate()
 
   const avatarColors = ['bg-pink-400', 'bg-orange-400', 'bg-violet-400', 'bg-emerald-400', 'bg-blue-400']
 
@@ -55,9 +53,12 @@ const HeroSection = () => {
 
         {/* CTA Buttons */}
         <div className="flex flex-wrap items-center justify-center gap-3 ">
-          <button className="px-8 py-4 rounded-full cursor-pointer bg-gradient-to-r from-indigo-500 to-sky-500 text-white font-semibold text-sm tracking-wide shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 hover:-translate-y-0.5 transition-all duration-200" onClick={()=>navigate("/create-trip")}>
-            Get Started — It's Free →
-          </button>
+          <Link to={'/create-trip'}>
+            <button className="px-8 py-4 rounded-full cursor-pointer bg-gradient-to-r from-indigo-500
+            to-sky-500 text-white font-semibold text-sm tracking-wide shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 hover:-translate-y-0.5 transition-all duration-200" >
+              Get Started — It's Free →
+            </button>
+          </Link>
          
         </div>
       </div>
