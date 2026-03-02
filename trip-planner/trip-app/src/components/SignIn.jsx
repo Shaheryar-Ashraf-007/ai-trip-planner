@@ -1,62 +1,50 @@
+import React from "react";
 import { useGoogleLogin } from "@react-oauth/google";
-import { useNavigate } from "react-router";
 
-const SignIn = ({ open, onClose }) => {
-
-  const navigate = useNavigate();
-
+const SignIn = ({ open, onClose, onLoginSuccess }) => {
+  
+  // ✅ Correctly declare login at top level inside component
   const login = useGoogleLogin({
-    onSuccess: (codeResp) => {
-    console.log(codeResp);
-      onClose?.();   // close from parent
+    onSuccess: (tokenResponse) => {
+      if (!tokenResponse.access_token) {
+        console.error("Google login did not return access_token");
+        return;
+      }
+      
+      const user = {
+        access_token: tokenResponse.access_token,
+        token_type: tokenResponse.token_type,
+      };
+
+      // Save user in localStorage
+      localStorage.setItem("user", JSON.stringify(user));
+      
+      // Notify parent
+      onLoginSuccess(user);
+      onClose?.();
     },
     onError: (error) => {
-      console.log("Login failed:", error);
-    }
+      console.error("Google login failed:", error);
+    },
   });
-
   
-  // hide dialog when not open
   if (!open) return null;
-
-  const handleClose = () => {
-    onClose?.();   // close from parent
-    navigate("/"); // go home
-  };
-
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-black/50 z-50">
-
-      {/* Dialog Box */}
-      <div className="bg-white rounded-2xl shadow-xl p-8 w-[90%] max-w-md text-center relative">
-
-        {/* Close Button */}
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl p-8 w-96 flex flex-col gap-6">
+        <h2 className="text-xl font-bold text-center">Sign in to continue</h2>
         <button
-          onClick={handleClose}
-          className="absolute right-4 top-3 text-gray-500 hover:text-black text-xl"
+          onClick={() => login()}
+          className="bg-red-500 text-white py-3 rounded-xl font-semibold hover:bg-red-600 transition"
         >
-          ✕
+          Sign in with Google
         </button>
-
-        <h2 className="text-2xl font-bold text-indigo-950 mb-6">
-          Sign In
-        </h2>
-
-        {/* Google Button */}
-        <button className="flex items-center justify-center gap-3 cursor-pointer w-full border rounded-lg py-3 hover:bg-gray-100 transition">
-
-          <img
-            src="https://www.svgrepo.com/show/475656/google-color.svg"
-            alt="google"
-            className="w-5 h-5"
-          />
-
-          <span className="font-medium cursor-pointer" onClick={login}>
-            Sign in with Google
-          </span>
-
+        <button
+          onClick={onClose}
+          className="text-slate-600 hover:text-slate-900 font-medium text-sm"
+        >
+          Cancel
         </button>
-
       </div>
     </div>
   );

@@ -58,33 +58,53 @@ const CreateTrip = () => {
   const [selectedDest, setSelectedDest] = useState(null);
 
   const [openDialog, setOpenDialog] = useState(false);
+
+    const [user, setUser] = useState(JSON.parse(localStorage.getItem("user")));
   
 
-  const generateTrip = ()=>{
+    const handleLoginSuccess = (userInfo) => {
+    setUser(userInfo);
+    // Optionally: fetch profile immediately after login
+    getUserProfile(userInfo);
+  };
 
-    const user = localStorage.getItem("user");
-    if(!user){
-      setOpenDialog(true)
+  // ✅ Fetch Google user profile
+  const getUserProfile = async (userData = user) => {
+    if (!userData || !userData.access_token) {
+      console.warn("No user logged in. Opening login dialog...");
+      setOpenDialog(true);
       return;
     }
-  }
 
-  const getUserProfile = async (tokenInfo)=>{
-    axios.get(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${tokenInfo.access_token}`, {
-      headers: {
-        Authorization: `Bearer ${tokenInfo.access_token}`,
-        },
-    }).then((res)=>{
-      console.log("User Info:", res.data);
-      localStorage.setItem("user", JSON.stringify(res.data));
-    }).catch((err)=>{
+    try {
+      const res = await axios.get(
+        "https://www.googleapis.com/oauth2/v3/userinfo",
+        {
+          headers: {
+            Authorization: `Bearer ${userData.access_token}`,
+          },
+        }
+      );
+
+      console.log("User profile:", res.data);
+      // Save full profile if needed
+      localStorage.setItem("userProfile", JSON.stringify(res.data));
+      // You can now generate trip based on this user
+    } catch (err) {
       console.error("Failed to fetch user info:", err);
-    });
+      // Token might be invalid/expired, ask login again
+      setOpenDialog(true);
+    }
+  };
+  const generateTrip = () => {
+    if (!user) {
+      setOpenDialog(true);
+      return;
+    }
+    console.log("Generating trip for:", user);
+    getUserProfile();
+  };
 
-    setOpenDialog(false)
-    generateTrip();
-
-  }
 
   
   const [daysOpen, setDaysOpen] = useState(false);
@@ -249,13 +269,13 @@ const CreateTrip = () => {
           <div className="h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
 
           {/* Generate Button */}
-          <button onClick={getUserProfile} className="w-full cursor-pointer py-4 rounded-2xl bg-gradient-to-r from-indigo-500 to-sky-500 text-white font-semibold text-base tracking-wide shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200">
+          <button onClick={generateTrip} className="w-full cursor-pointer py-4 rounded-2xl bg-gradient-to-r from-indigo-500 to-sky-500 text-white font-semibold text-base tracking-wide shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200">
             ✨ Generate My Itinerary
           </button>
           <SignIn
           open={openDialog}
           onClose={() => setOpenDialog(false)}
-          
+          onLoginSuccess={handleLoginSuccess}
           />
         </div>
 
