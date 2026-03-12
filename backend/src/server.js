@@ -1,20 +1,23 @@
-import express from 'express';
-import cors from 'cors';
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import tripRoutes from "./routes/Trip.route.js"
+import fetchRoutes from "./routes/Fetch.route.js"
+dotenv.config();
 
+const app  = express();
+const PORT = process.env.PORT || 3000;
 
-const app = express();
-
+// ── Middleware ─────────────────────────────────────────────────────────────
+app.use(cors({ origin: "http://localhost:5173"}, {Credential: true}));
 app.use(express.json());
 
-app.use(cors(
+// ── Routes ─────────────────────────────────────────────────────────────────
+app.use("/api/trip", tripRoutes);
 
-))
+app.use("/api/trip", fetchRoutes)
 
-const port = 3000;
-app.listen(port , () => {
-  console.log('Server is running on port 3000');
-}
-);
+// ── Health check ───────────────────────────────────────────────────────────
+app.get("/api/health", (_, res) => res.json({ status: "ok" }));
 
-
-export default app;
+app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
