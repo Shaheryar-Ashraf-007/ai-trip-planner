@@ -3,16 +3,15 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import HotelCard from "../../../components/Card.jsx";
 import Itinerary from "../../../components/Itinerary.jsx";
+import { fetchPexelsImage } from "../../../services/GlobalApi.js";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
-// ── Helper: strip PKR string → number  ("PKR 8,000/night" → 8000) ────────────
 const parsePrice = (priceStr) => {
   if (!priceStr) return 0;
   return parseInt(priceStr.replace(/[^0-9]/g, "")) || 0;
 };
 
-// ── Skeleton ──────────────────────────────────────────────────────────────────
 const Skeleton = ({ className }) => (
   <div className={`animate-pulse bg-blue-100/70 rounded-xl ${className}`} />
 );
@@ -35,25 +34,72 @@ const LoadingSkeleton = () => (
   </div>
 );
 
-// ── Label maps ────────────────────────────────────────────────────────────────
 const BUDGET_DISPLAY = {
-  cheap:    { label: "Budget",   icon: "💸", color: "text-green-700 bg-green-50 border-green-200" },
-  moderate: { label: "Moderate", icon: "💳", color: "text-blue-700 bg-blue-50 border-blue-200"   },
+  cheap:    { label: "Budget",   icon: "💸", color: "text-green-700 bg-green-50 border-green-200"     },
+  moderate: { label: "Moderate", icon: "💳", color: "text-blue-700 bg-blue-50 border-blue-200"       },
   luxury:   { label: "Luxury",   icon: "💎", color: "text-purple-700 bg-purple-50 border-purple-200" },
 };
 
 const TRAVELERS_DISPLAY = {
-  solo:    { label: "Solo",    icon: "🧍" },
-  couple:  { label: "Couple",  icon: "👫" },
-  family:  { label: "Family",  icon: "👨‍👩‍👧" },
+  solo:    { label: "Solo",    icon: "🧍"    },
+  couple:  { label: "Couple",  icon: "👫"    },
+  family:  { label: "Family",  icon: "👨‍👩‍👧"  },
   friends: { label: "Friends", icon: "🧑‍🤝‍🧑" },
+};
+
+// ── HotelsTab with cancelled flag ─────────────────────────────────────────────
+const HotelsTab = ({ hotels, destination }) => {
+  const [hotelImages, setHotelImages] = useState({});
+
+  useEffect(() => {
+    if (!hotels.length) return;
+
+    let cancelled = false; // ← prevents Strict Mode double-fire race condition
+
+    hotels.forEach((hotel, idx) => {
+      const query = `${hotel.name} ${destination?.short || destination?.name || ""}`.trim();
+
+      fetchPexelsImage(query, idx).then((url) => {
+        if (!cancelled && url) {
+          setHotelImages((prev) => ({ ...prev, [idx]: url }));
+        }
+      });
+    });
+
+    return () => { cancelled = true; };
+  }, [hotels, destination]);
+
+  if (hotels.length === 0) {
+    return (
+      <div className="bg-white/75 border border-blue-100 rounded-3xl p-12 text-center">
+        <div className="text-5xl mb-4 opacity-30">🏨</div>
+        <p className="text-slate-400 font-medium">No hotels found for this trip.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap gap-6">
+      {hotels.map((hotel, idx) => (
+        <HotelCard
+          key={idx}
+          image={hotelImages[idx] ?? hotel.imageUrl ?? null}
+          name={hotel.name}
+          description={hotel.description}
+          price={parsePrice(hotel.price)}
+          rating={hotel.rating}
+          bestseason={hotel.bestseason ?? null}
+        />
+      ))}
+    </div>
+  );
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ViewTrips = () => {
-  const { tripId }  = useParams();
-  const navigate    = useNavigate();
+  const { tripId } = useParams();
+  const navigate   = useNavigate();
 
   const [trip, setTrip]           = useState(null);
   const [loading, setLoading]     = useState(true);
@@ -81,7 +127,6 @@ const ViewTrips = () => {
     }
   };
 
-  // ── States ──────────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100">
@@ -118,11 +163,8 @@ const ViewTrips = () => {
 
   if (!trip) return null;
 
-  // ── Destructure DB response ─────────────────────────────────────────────────
   const { destination, budget, travelers, days, userProfile, plan, createdAt } = trip;
 
-  // Firestore can return arrays as plain objects with numeric keys {0:{...}, 1:{...}}
-  // toArray() handles both real JS arrays and Firestore numeric-keyed objects
   const toArray = (val) => {
     if (!val) return [];
     if (Array.isArray(val)) return val;
@@ -135,18 +177,16 @@ const ViewTrips = () => {
     activities: toArray(day?.activities),
   }));
 
-  const budgetMeta   = BUDGET_DISPLAY[budget]      || { label: budget,     icon: "💰", color: "text-blue-700 bg-blue-50 border-blue-200" };
-  const travelerMeta = TRAVELERS_DISPLAY[travelers] || { label: travelers,  icon: "👥" };
+  const budgetMeta   = BUDGET_DISPLAY[budget]      || { label: budget,    icon: "💰", color: "text-blue-700 bg-blue-50 border-blue-200" };
+  const travelerMeta = TRAVELERS_DISPLAY[travelers] || { label: travelers, icon: "👥" };
 
-  // Firestore returns createdAt as a Timestamp object { seconds, nanoseconds }
-  // Handle all 3 cases: Firestore Timestamp object, ISO string, or plain number
   const parseDate = (val) => {
     if (!val) return null;
-    if (val?.seconds) return new Date(val.seconds * 1000);   // Firestore Timestamp
+    if (val?.seconds) return new Date(val.seconds * 1000);
     if (typeof val === "string" || typeof val === "number") return new Date(val);
     return null;
   };
-  const parsedDate = parseDate(createdAt);
+  const parsedDate    = parseDate(createdAt);
   const formattedDate = parsedDate
     ? parsedDate.toLocaleDateString("en-PK", { day: "numeric", month: "long", year: "numeric" })
     : null;
@@ -156,7 +196,6 @@ const ViewTrips = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 relative overflow-x-hidden">
 
-      {/* Background blobs */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
         <div className="absolute -top-48 -right-48 w-96 h-96 rounded-full bg-blue-200 opacity-30 blur-3xl" />
         <div className="absolute -bottom-32 -left-32 w-80 h-80 rounded-full bg-blue-300 opacity-20 blur-3xl" />
@@ -168,7 +207,6 @@ const ViewTrips = () => {
         {/* ── Hero ─────────────────────────────────────────────────────────── */}
         <div className={`mb-10 transition-all duration-700 ${mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}>
 
-          {/* Top row */}
           <div className="flex items-center justify-between mb-6">
             <button
               onClick={() => navigate("/create-trip")}
@@ -186,13 +224,11 @@ const ViewTrips = () => {
             )}
           </div>
 
-          {/* Badge */}
           <div className="inline-flex items-center gap-2 bg-white/80 backdrop-blur-sm border border-blue-200 rounded-full px-4 py-1.5 mb-4">
             <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
             <span className="text-xs font-semibold text-blue-700 tracking-widest uppercase">AI Generated Trip ✦ Ready to explore</span>
           </div>
 
-          {/* Title */}
           <h1 className="text-4xl sm:text-5xl font-bold text-slate-900 leading-tight mb-2 tracking-tight">
             Your trip to{" "}
             <span className="text-blue-600 italic">
@@ -209,7 +245,6 @@ const ViewTrips = () => {
             </p>
           )}
 
-          {/* Meta chips */}
           <div className="flex flex-wrap gap-2.5">
             <span className="inline-flex items-center gap-1.5 bg-white/80 backdrop-blur-sm border border-blue-100 rounded-full px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm">
               📅 {days} {days === 1 ? "Day" : "Days"}
@@ -228,7 +263,6 @@ const ViewTrips = () => {
             </span>
           </div>
 
-          {/* User profile row */}
           {userProfile?.name && (
             <div className="flex items-center gap-2.5 mt-5 bg-white/60 backdrop-blur-sm border border-blue-100 rounded-2xl px-4 py-3 w-fit">
               {userProfile.picture && (
@@ -245,8 +279,8 @@ const ViewTrips = () => {
         {/* ── Tab Switcher ──────────────────────────────────────────────────── */}
         <div className={`flex bg-white/60 backdrop-blur-sm border border-blue-100 rounded-2xl p-1.5 mb-8 gap-1 transition-all duration-700 delay-150 ${mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}`}>
           {[
-            { key: "itinerary", icon: "🗓️", label: "Day-by-Day Itinerary",    count: `${itinerary.length} days`    },
-            { key: "hotels",    icon: "🏨", label: "Hotel Recommendations",   count: `${hotels.length} options`    },
+            { key: "itinerary", icon: "🗓️", label: "Day-by-Day Itinerary",  count: `${itinerary.length} days`  },
+            { key: "hotels",    icon: "🏨", label: "Hotel Recommendations", count: `${hotels.length} options`  },
           ].map((tab) => (
             <button
               key={tab.key}
@@ -269,7 +303,6 @@ const ViewTrips = () => {
         {/* ── Tab Content ───────────────────────────────────────────────────── */}
         <div className={`transition-all duration-500 delay-200 ${mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}`}>
 
-          {/* Hotels tab — map directly into HotelCard */}
           {activeTab === "hotels" && (
             <div>
               <div className="flex items-center gap-3 mb-6">
@@ -279,30 +312,10 @@ const ViewTrips = () => {
                   <p className="text-slate-400 text-xs">{hotels.length} option{hotels.length !== 1 ? "s" : ""} curated for your budget</p>
                 </div>
               </div>
-
-              {hotels.length === 0 ? (
-                <div className="bg-white/75 border border-blue-100 rounded-3xl p-12 text-center">
-                  <div className="text-5xl mb-4 opacity-30">🏨</div>
-                  <p className="text-slate-400 font-medium">No hotels found for this trip.</p>
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-6">
-                  {hotels.map((hotel, idx) => (
-                    <HotelCard
-                      key={idx}
-                      image={hotel.imageUrl}
-                      name={hotel.name}
-                      description={hotel.description}
-                      price={parsePrice(hotel.price)}
-                      rating={hotel.rating}
-                    />
-                  ))}
-                </div>
-              )}
+              <HotelsTab hotels={hotels} destination={destination} />
             </div>
           )}
 
-          {/* Itinerary tab */}
           {activeTab === "itinerary" && (
             <Itinerary itinerary={itinerary} />
           )}

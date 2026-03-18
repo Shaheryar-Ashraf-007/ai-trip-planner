@@ -30,13 +30,23 @@ export async function generateTravelPlan({ destination, budget, travelers, days,
 
     console.log("✅ Trip generated successfully:", response.data);
 
-    // Return both the tripId and the travel plan data
     return {
       tripId: response.data.tripId,
       ...response.data.data, // hotels[] and itinerary[]
     };
+
   } catch (error) {
-    console.error("❌ Error generating travel plan:", error);
-    throw error; // Re-throw so the calling function can handle it
+    // Normalize error message for the UI:
+    // 1. Backend responded with an error status (4xx / 5xx)
+    // 2. Request was made but no response received (network down)
+    // 3. Something else (setup error, etc.)
+    const message =
+      error?.response?.data?.message ||   // backend error body
+      error?.message                  ||   // axios / JS error
+      "Something went wrong. Please try again.";
+
+    console.error("❌ Error generating travel plan:", message);
+
+    throw new Error(message); // always throws a plain Error with a clean message
   }
 }
