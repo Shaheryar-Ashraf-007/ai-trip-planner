@@ -1,5 +1,5 @@
 import express from "express";
-import { getAllTrips, getTripById } from "../controllers/Fetch.Data.js";
+import { deleteTrip, getAllTrips, getTripById, updateTrip } from "../controllers/Fetch.Data.js";
 
 const router = express.Router();
 
@@ -7,6 +7,9 @@ const router = express.Router();
 
 router.get("/view-trip/:tripId", getTripById)
 router.get("/my-trips", getAllTrips)
+router.delete("/delete-trip/:tripId", deleteTrip);
+router.put("/update-trips/:tripId", updateTrip);
+
 
 
 export default router;

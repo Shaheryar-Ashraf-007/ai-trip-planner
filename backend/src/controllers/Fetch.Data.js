@@ -61,3 +61,50 @@ export const getAllTrips = async (req, res) => {
 
   }
 };
+export const deleteTrip = async (req, res) => {
+  try {
+    const { tripId } = req.params;
+
+    const tripRef = db.collection("trips").doc(tripId);
+    const tripDoc = await tripRef.get();
+
+    if (!tripDoc.exists) {
+      return res.status(404).json({ message: "Trip not found" });
+    }
+
+    await tripRef.delete();
+
+    res.status(200).json({ message: "Trip deleted successfully" });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const updateTrip = async (req, res) => {
+  try {
+    const { tripId } = req.params; // ✅ from params
+    const { budget } = req.body;
+
+    if (!tripId) {
+      return res.status(400).json({ message: "Trip ID is required" });
+    }
+
+    const tripRef = db.collection("trips").doc(tripId);
+
+    await tripRef.update({
+      budget,
+      updatedAt: new Date(),
+    });
+
+    res.status(200).json({
+      message: "Trip updated successfully",
+    });
+
+  } catch (error) {
+    console.error("Update error:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};

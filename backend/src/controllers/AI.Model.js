@@ -2,7 +2,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import db from "../config/db.js";
 
 const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || "AIzaSyB2NJPEDwoZBJQgKjOVD3GUvPtPKXRhuow",
+  apiKey: process.env.GEMINI_API_KEY || "AIzaSyBjsbwRUa108Q-RDiBL-6pQeqvl4znjYEI",
 });
 
 // ─── Label Maps ───────────────────────────────────────────────────────────────
