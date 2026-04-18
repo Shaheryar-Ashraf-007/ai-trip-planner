@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import tripRoutes from "./routes/Trip.route.js"
 import fetchRoutes from "./routes/Fetch.route.js"
+import authRoutes from "./routes/authRoutes.js";
 dotenv.config();
 
 const app  = express();
@@ -14,7 +15,7 @@ app.use(express.json());
 
 // ── Routes ─────────────────────────────────────────────────────────────────
 app.use("/api/trip", tripRoutes);
-
+app.use("/api/auth", authRoutes);
 app.use("/api/trip", fetchRoutes)
 
 // ── Health check ───────────────────────────────────────────────────────────

@@ -1,3 +1,7 @@
-src/config/firebaseKey.json
+node_modules
+.env
+.env.*
 firebaseKey.json
-*.env
+src/config/firebaseKey.json
+dist
+build
