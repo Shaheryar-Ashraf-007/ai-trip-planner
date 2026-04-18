@@ -16,18 +16,31 @@ const CreateTrip = () => {
   const [mounted, setMounted] = useState(false);
   const [formData, setFormData] = useState({ budget: "", travelers: "", days: 1 });
   const [dropdownStyle, setDropdownStyle] = useState({});
-  const [generatingStep, setGeneratingStep] = useState(""); // loading status message
+  const [generatingStep, setGeneratingStep] = useState("");
+  const [openDialog, setOpenDialog] = useState(false);
+  const [generatingTrip, setGeneratingTrip] = useState(false);
+  const dropdownRef = useRef(null);
+  const inputWrapRef = useRef(null);
+  const debounceRef = useRef(null);
+
+  // ── Read user from localStorage (works for both Google & manual) ──────────
   const [user, setUser] = useState(() => {
     try { return JSON.parse(localStorage.getItem("user")); } catch { return null; }
   });
   const [userProfile, setUserProfile] = useState(() => {
     try { return JSON.parse(localStorage.getItem("userProfile")); } catch { return null; }
   });
-  const [openDialog, setOpenDialog] = useState(false);
-  const [generatingTrip, setGeneratingTrip] = useState(false);
-  const dropdownRef = useRef(null);
-  const inputWrapRef = useRef(null);
-  const debounceRef = useRef(null);
+
+  // Determine if user logged in via Google (token stored separately)
+  // Google flow: localStorage has "token" (the access_token) + "user" (profile)
+  // Manual flow: localStorage has "token" (JWT) + "user" (id/name/email, no picture)
+  const isGoogleUser = user?.provider === "google";
+
+  // Unified display profile — Google users have picture already in `user`,
+  // manual users just have name & email
+  const displayName  = user?.name  || userProfile?.name  || "";
+  const displayPic   = user?.picture || userProfile?.picture || null;
+  const firstName    = displayName.split(" ")[0];
 
   useEffect(() => {
     setTimeout(() => setMounted(true), 80);
@@ -68,101 +81,121 @@ const CreateTrip = () => {
     };
   }, [showDropdown, updateDropdownPosition]);
 
-  // ── Google login hook ─────────────────────────────────────────────────────
+  // ── Google login hook (used from the sign-in dialog inside CreateTrip) ────
   const googleLogin = useGoogleLogin({
-    onSuccess: (tokenRes) => {
-      localStorage.setItem("user", JSON.stringify(tokenRes));
-      setUser(tokenRes);
-      fetchUserProfile(tokenRes);
+  onSuccess: async (tokenRes) => {
+    try {
+      const { data: googleData } = await axios.get(
+        "https://www.googleapis.com/oauth2/v3/userinfo",
+        { headers: { Authorization: `Bearer ${tokenRes.access_token}` } }
+      );
+
+      // Exchange for real JWT from your backend
+      const { data } = await axios.post(
+        "http://localhost:3000/api/auth/google-auth",
+        {
+          name:    googleData.name,
+          email:   googleData.email,
+          picture: googleData.picture,
+        }
+      );
+
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("user",  JSON.stringify(data.user));
+      setUser(data.user);
+      setUserProfile(data.user);
       setOpenDialog(false);
-    },
-    onError: (err) => console.error("Google login failed:", err),
-  });
-
-  // ── Fetch Google user profile ─────────────────────────────────────────────
-  const fetchUserProfile = useCallback(async (userData) => {
-    if (!userData?.access_token) return;
-    try {
-      const res = await axios.get("https://www.googleapis.com/oauth2/v3/userinfo", {
-        headers: { Authorization: `Bearer ${userData.access_token}` },
-      });
-      setUserProfile(res.data);
-      localStorage.setItem("userProfile", JSON.stringify(res.data));
     } catch (err) {
-      console.error("Profile fetch failed:", err);
-      localStorage.removeItem("user");
-      localStorage.removeItem("userProfile");
-      setUser(null);
-      setUserProfile(null);
-      setOpenDialog(true);
+      console.error("Google login failed:", err);
     }
-  }, []);
-
-  // ── Generate trip (auth-gated) ────────────────────────────────────────────
-  const generateTrip = async () => {
-    if (!selectedDest)        return alert("Please select a destination");
-    if (!formData.budget)     return alert("Please select a budget");
-    if (!formData.travelers)  return alert("Please select who you're traveling with");
-    if (!user) { setOpenDialog(true); return; }
-
-    setGeneratingTrip(true);
-    setGeneratingStep("Verifying your account...");
-
-    try {
-      // Step 1 — re-verify Google token
-      const profileRes = await axios.get("https://www.googleapis.com/oauth2/v3/userinfo", {
-        headers: { Authorization: `Bearer ${user.access_token}` },
-      });
-      setUserProfile(profileRes.data);
-      localStorage.setItem("userProfile", JSON.stringify(profileRes.data));
-
-      // Step 2 — call AI backend
-      setGeneratingStep("AI is crafting your itinerary...");
-      const plan = await generateTravelPlan({
-        destination: selectedDest,
-        budget:      formData.budget,
-        travelers:   formData.travelers,
-        days:        formData.days,
-        userProfile: profileRes.data
-      });
-
-        localStorage.setItem("tripId", plan.tripId);
-
-
-      // Step 3 — navigate to results
-      setGeneratingStep("Almost ready...");
-      navigate(`/view-trip/${plan.tripId}`, { state: plan });
-    } catch (err) {
-      if (err?.response?.status === 401) {
-        localStorage.removeItem("user");
-        localStorage.removeItem("userProfile");
-        setUser(null);
-        setUserProfile(null);
-        setOpenDialog(true);
-      } else {
-        console.error("Trip generation failed:", err);
-        alert(err?.response?.data?.message || "Failed to generate trip. Please try again.");
-      }
-    } finally {
-      setGeneratingTrip(false);
-      setGeneratingStep("");
-    }
-  };
+  },
+  onError: (err) => console.error("Google login failed:", err),
+});
 
   // ── Sign out ──────────────────────────────────────────────────────────────
   const handleSignOut = () => {
     localStorage.removeItem("user");
     localStorage.removeItem("userProfile");
+    localStorage.removeItem("token");
     setUser(null);
     setUserProfile(null);
   };
 
-  const fetchSuggestions = useCallback(async (val) => {
-    if (!val || val.length < 2) {
-      setSuggestions([]);
-      setShowDropdown(false);
-      return;
+  const generateTrip = async () => {
+  if (!selectedDest)       return alert("Please select a destination");
+  if (!formData.budget)    return alert("Please select a budget");
+  if (!formData.travelers) return alert("Please select who you're traveling with");
+  if (!user) { setOpenDialog(true); return; }
+
+  setGeneratingTrip(true);
+  setGeneratingStep("Verifying your account...");
+
+  try {
+    let activeProfile;
+
+    if (isGoogleUser) {
+      // ── Google user: profile already stored in localStorage ─────────────
+      // No need to re-verify with Google API since we now use our own JWT
+      const storedProfile = localStorage.getItem("userProfile");
+      activeProfile = storedProfile ? JSON.parse(storedProfile) : user;
+    } else {
+      // ── Manual user: build profile from stored user object ───────────────
+      activeProfile = {
+        name:    user.name  || "Traveler",
+        email:   user.email || "",
+        picture: user.picture || null,
+        id:      user.id    || null,
+      };
     }
+
+    // ── Final safety check ────────────────────────────────────────────────
+    if (!activeProfile?.email) {
+      // Fallback — use whatever is in user state
+      activeProfile = {
+        name:    user.name  || "Traveler",
+        email:   user.email || "",
+        picture: user.picture || null,
+        id:      user.id    || null,
+      };
+    }
+
+    setGeneratingStep("AI is crafting your itinerary...");
+    const plan = await generateTravelPlan({
+      destination: selectedDest,
+      budget:      formData.budget,
+      travelers:   formData.travelers,
+      days:        formData.days,
+      userProfile: activeProfile,
+    });
+
+    localStorage.setItem("tripId", plan.tripId);
+    setGeneratingStep("Almost ready...");
+    navigate(`/view-trip/${plan.tripId}`, { state: plan });
+
+  } catch (err) {
+    // generateTravelPlan always throws a plain Error (not an axios error)
+    // so check message string for 401-like errors
+    if (err?.message?.toLowerCase().includes("logged in") ||
+        err?.message?.toLowerCase().includes("unauthorized")) {
+      localStorage.removeItem("user");
+      localStorage.removeItem("userProfile");
+      localStorage.removeItem("token");
+      setUser(null);
+      setUserProfile(null);
+      setOpenDialog(true);
+    } else {
+      console.error("Trip generation failed:", err);
+      alert(err?.message || "Failed to generate trip. Please try again.");
+    }
+  } finally {
+    setGeneratingTrip(false);
+    setGeneratingStep("");
+  }
+};
+
+  // ── Location search ───────────────────────────────────────────────────────
+  const fetchSuggestions = useCallback(async (val) => {
+    if (!val || val.length < 2) { setSuggestions([]); setShowDropdown(false); return; }
     setSearching(true);
     try {
       const res = await fetch(
@@ -171,9 +204,7 @@ const CreateTrip = () => {
       const data = await res.json();
       setSuggestions(data);
       setShowDropdown(data.length > 0);
-    } catch (err) {
-      console.error(err);
-    }
+    } catch (err) { console.error(err); }
     setSearching(false);
   }, []);
 
@@ -192,11 +223,11 @@ const CreateTrip = () => {
       place.address?.village ||
       place.display_name.split(",")[0];
     setSelectedDest({
-      name: place.display_name,
-      short: city,
+      name:    place.display_name,
+      short:   city,
       country: place.address?.country || "",
-      lat: parseFloat(place.lat),
-      lon: parseFloat(place.lon),
+      lat:     parseFloat(place.lat),
+      lon:     parseFloat(place.lon),
     });
     setQuery(city);
     setShowDropdown(false);
@@ -220,16 +251,16 @@ const CreateTrip = () => {
     : null;
 
   const budgets = [
-    { value: "cheap", label: "Budget", icon: "💸", desc: "Smart & economical" },
+    { value: "cheap",    label: "Budget",   icon: "💸", desc: "Smart & economical" },
     { value: "moderate", label: "Moderate", icon: "💳", desc: "Balanced comfort" },
-    { value: "luxury", label: "Luxury", icon: "💎", desc: "Premium experience" },
+    { value: "luxury",   label: "Luxury",   icon: "💎", desc: "Premium experience" },
   ];
 
   const travelers = [
-    { value: "solo", label: "Solo", icon: "🧍", desc: "Just me" },
-    { value: "couple", label: "Couple", icon: "👫", desc: "Two of us" },
-    { value: "family", label: "Family", icon: "👨‍👩‍👧", desc: "With kids" },
-    { value: "friends", label: "Friends", icon: "🧑‍🤝‍🧑", desc: "Squad trip" },
+    { value: "solo",    label: "Solo",    icon: "🧍",       desc: "Just me" },
+    { value: "couple",  label: "Couple",  icon: "👫",       desc: "Two of us" },
+    { value: "family",  label: "Family",  icon: "👨‍👩‍👧",      desc: "With kids" },
+    { value: "friends", label: "Friends", icon: "🧑‍🤝‍🧑",     desc: "Squad trip" },
   ];
 
   const steps = ["Destination", "Budget", "Travelers", "Days", "Ready"];
@@ -256,11 +287,18 @@ const CreateTrip = () => {
             </div>
 
             {/* User avatar / sign-in */}
-            {user && userProfile ? (
+            {user ? (
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-2 bg-white bg-opacity-80 backdrop-blur-sm border border-blue-100 rounded-full pl-1.5 pr-3 py-1 shadow-sm">
-                  <img src={userProfile.picture} alt={userProfile.name} className="w-7 h-7 rounded-full object-cover" />
-                  <span className="text-xs font-semibold text-slate-700 hidden sm:inline">{userProfile.given_name}</span>
+                  {displayPic ? (
+                    <img src={displayPic} alt={firstName} className="w-7 h-7 rounded-full object-cover" />
+                  ) : (
+                    // Fallback avatar for manual users (no picture)
+                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                      {firstName.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  <span className="text-xs font-semibold text-slate-700 hidden sm:inline">{firstName}</span>
                 </div>
                 <button
                   onClick={handleSignOut}
@@ -291,7 +329,7 @@ const CreateTrip = () => {
           {steps.map((s, i) => {
             const n = i + 1;
             const isActive = activeStep === n;
-            const isDone = activeStep > n;
+            const isDone   = activeStep > n;
             return (
               <div
                 key={s}
@@ -316,21 +354,23 @@ const CreateTrip = () => {
             ${mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-5"}`}>
             <div className="flex items-center gap-3 mb-5">
               <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center text-lg">🌍</div>
-              <div>
+              <div className="">
                 <p className="font-bold text-slate-800 text-base">Where to?</p>
+                <div className="flex items-center justify-between">
                 <p className="text-slate-400 text-xs">Search your dream destination</p>
+                <p className="text-slate-400 text-xs">When you search places First Letter should be capital of place and spellings corrected too </p>
+                </div>
               </div>
             </div>
 
-            {/* Search with Dropdown */}
             <div className="relative">
               <div
                 ref={inputWrapRef}
                 className={`flex items-center gap-3 border-2 rounded-2xl px-4 py-3 bg-white transition-all duration-200
                 ${showDropdown
                   ? "border-blue-400 shadow-lg shadow-blue-100 rounded-b-none"
-                  : "border-blue-200 focus-within:border-blue-400 focus-within:shadow-lg focus-within:shadow-blue-100"}`}>
-
+                  : "border-blue-200 focus-within:border-blue-400 focus-within:shadow-lg focus-within:shadow-blue-100"}`}
+              >
                 <span className="text-lg flex-shrink-0 w-6 flex justify-center">
                   {searching ? (
                     <svg className="w-5 h-5 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
@@ -343,7 +383,6 @@ const CreateTrip = () => {
                     </svg>
                   )}
                 </span>
-
                 <input
                   type="text"
                   value={query}
@@ -352,27 +391,16 @@ const CreateTrip = () => {
                   placeholder="e.g. Paris, Tokyo, Maldives..."
                   className="flex-1 outline-none text-slate-800 placeholder-slate-400 text-sm font-medium bg-transparent"
                 />
-
                 {query && (
                   <button
-                    onClick={() => {
-                      setQuery("");
-                      setSelectedDest(null);
-                      setSuggestions([]);
-                      setShowDropdown(false);
-                    }}
+                    onClick={() => { setQuery(""); setSelectedDest(null); setSuggestions([]); setShowDropdown(false); }}
                     className="text-slate-300 hover:text-slate-500 transition-colors text-xl leading-none font-light"
                   >×</button>
                 )}
               </div>
 
-              {/* Dropdown rendered via portal so it floats above all cards */}
               {showDropdown && suggestions.length > 0 && createPortal(
-                <div
-                  ref={dropdownRef}
-                  style={dropdownStyle}
-                  className="bg-white border-2 border-blue-400 border-t-0 rounded-b-2xl shadow-2xl shadow-blue-100 overflow-hidden"
-                >
+                <div ref={dropdownRef} style={dropdownStyle} className="bg-white border-2 border-blue-400 border-t-0 rounded-b-2xl shadow-2xl shadow-blue-100 overflow-hidden">
                   <div className="divide-y divide-slate-100">
                     {suggestions.map((place, idx) => {
                       const city =
@@ -381,35 +409,25 @@ const CreateTrip = () => {
                         place.address?.village ||
                         place.display_name.split(",")[0];
                       const country = place.address?.country || "";
-                      const region = place.address?.state || place.address?.county || "";
+                      const region  = place.address?.state || place.address?.county || "";
                       return (
                         <button
                           key={idx}
                           onClick={() => handleSelect(place)}
                           className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 transition-colors text-left group"
                         >
-                          <span className="text-xl w-8 text-center flex-shrink-0">
-                            {getPlaceIcon(place.type)}
-                          </span>
+                          <span className="text-xl w-8 text-center flex-shrink-0">{getPlaceIcon(place.type)}</span>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-slate-800 truncate group-hover:text-blue-700 transition-colors">
-                              {city}
-                            </p>
-                            <p className="text-xs text-slate-400 truncate">
-                              {[region, country].filter(Boolean).join(", ")}
-                            </p>
+                            <p className="text-sm font-semibold text-slate-800 truncate group-hover:text-blue-700 transition-colors">{city}</p>
+                            <p className="text-xs text-slate-400 truncate">{[region, country].filter(Boolean).join(", ")}</p>
                           </div>
-                          <span className="text-xs text-slate-300 group-hover:text-blue-500 transition-all group-hover:translate-x-0.5 flex-shrink-0">
-                            →
-                          </span>
+                          <span className="text-xs text-slate-300 group-hover:text-blue-500 transition-all group-hover:translate-x-0.5 flex-shrink-0">→</span>
                         </button>
                       );
                     })}
                   </div>
                   <div className="px-4 py-2 bg-slate-50 border-t border-slate-100 flex items-center gap-1.5">
-                    <svg className="w-3 h-3 text-slate-300" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
-                    </svg>
+                    <svg className="w-3 h-3 text-slate-300" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/></svg>
                     <span className="text-xs text-slate-400">Powered by OpenStreetMap</span>
                   </div>
                 </div>,
@@ -417,7 +435,6 @@ const CreateTrip = () => {
               )}
             </div>
 
-            {/* Selected destination pill */}
             {selectedDest && (
               <div className="mt-3 inline-flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-full pl-1.5 pr-4 py-1">
                 <span className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">✓</span>
@@ -438,15 +455,11 @@ const CreateTrip = () => {
                 <p className="text-slate-400 text-xs">How much are you looking to spend?</p>
               </div>
             </div>
-
             <div className="grid grid-cols-3 gap-3">
               {budgets.map((b) => (
                 <button
                   key={b.value}
-                  onClick={() => {
-                    setFormData({ ...formData, budget: b.value });
-                    if (activeStep < 3) setActiveStep(3);
-                  }}
+                  onClick={() => { setFormData({ ...formData, budget: b.value }); if (activeStep < 3) setActiveStep(3); }}
                   className={`relative flex flex-col items-center gap-1.5 py-5 px-3 rounded-2xl border-2 transition-all duration-200
                     ${formData.budget === b.value
                       ? "border-blue-500 bg-blue-50 shadow-lg shadow-blue-100 -translate-y-0.5"
@@ -473,15 +486,11 @@ const CreateTrip = () => {
                 <p className="text-slate-400 text-xs">Who's joining the adventure?</p>
               </div>
             </div>
-
             <div className="grid grid-cols-4 gap-2">
               {travelers.map((t) => (
                 <button
                   key={t.value}
-                  onClick={() => {
-                    setFormData({ ...formData, travelers: t.value });
-                    if (activeStep < 4) setActiveStep(4);
-                  }}
+                  onClick={() => { setFormData({ ...formData, travelers: t.value }); if (activeStep < 4) setActiveStep(4); }}
                   className={`relative flex flex-col items-center gap-1.5 py-4 px-2 rounded-2xl border-2 transition-all duration-200
                     ${formData.travelers === t.value
                       ? "border-blue-500 bg-blue-50 shadow-lg shadow-blue-100 -translate-y-0.5"
@@ -508,46 +517,29 @@ const CreateTrip = () => {
                 <p className="text-slate-400 text-xs">How many days are you planning to travel?</p>
               </div>
             </div>
-
-            {/* Day display */}
             <div className="flex items-center justify-center mb-5">
               <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-2xl px-8 py-4 text-center min-w-[140px]">
                 <p className="text-5xl font-bold text-blue-600 leading-none">{formData.days}</p>
                 <p className="text-sm text-blue-400 font-medium mt-1">{formData.days === 1 ? "day" : "days"}</p>
               </div>
             </div>
-
-            {/* Slider */}
             <div className="px-1">
               <input
-                type="range"
-                min={1}
-                max={14}
-                value={formData.days}
-                onChange={(e) => {
-                  setFormData({ ...formData, days: parseInt(e.target.value) });
-                  if (activeStep < 5) setActiveStep(5);
-                }}
+                type="range" min={1} max={14} value={formData.days}
+                onChange={(e) => { setFormData({ ...formData, days: parseInt(e.target.value) }); if (activeStep < 5) setActiveStep(5); }}
                 className="w-full h-2 rounded-full appearance-none cursor-pointer"
-                style={{
-                  background: `linear-gradient(to right, #2563eb ${((formData.days - 1) / 13) * 100}%, #dbeafe ${((formData.days - 1) / 13) * 100}%)`,
-                }}
+                style={{ background: `linear-gradient(to right, #2563eb ${((formData.days - 1) / 13) * 100}%, #dbeafe ${((formData.days - 1) / 13) * 100}%)` }}
               />
               <div className="flex justify-between mt-2">
                 <span className="text-xs text-slate-400 font-medium">1 day</span>
                 <span className="text-xs text-slate-400 font-medium">14 days</span>
               </div>
             </div>
-
-            {/* Quick-select day pills */}
             <div className="flex flex-wrap gap-2 mt-4">
               {[1, 2, 3, 5, 7, 10, 14].map((d) => (
                 <button
                   key={d}
-                  onClick={() => {
-                    setFormData({ ...formData, days: d });
-                    if (activeStep < 5) setActiveStep(5);
-                  }}
+                  onClick={() => { setFormData({ ...formData, days: d }); if (activeStep < 5) setActiveStep(5); }}
                   className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all duration-200
                     ${formData.days === d
                       ? "bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-200"
@@ -571,15 +563,9 @@ const CreateTrip = () => {
                 </p>
               </div>
             </div>
-
             <div className="rounded-2xl overflow-hidden border border-blue-100 h-72 bg-gradient-to-br from-blue-50 to-blue-100">
               {selectedDest ? (
-                <iframe
-                  src={osmUrl}
-                  title="Destination Map"
-                  className="w-full h-full border-none block"
-                  loading="lazy"
-                />
+                <iframe src={osmUrl} title="Destination Map" className="w-full h-full border-none block" loading="lazy" />
               ) : (
                 <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400">
                   <span className="text-5xl opacity-25">🌐</span>
@@ -624,49 +610,36 @@ const CreateTrip = () => {
               </>
             )}
           </button>
-
           <p className="text-center text-slate-400 text-xs mt-3 tracking-wide">
             {user
               ? "✦ Powered by AI · Your itinerary is generated instantly"
-              : "✦ Sign in with Google to unlock your personalized itinerary"}
+              : "✦ Sign in with Google or your account to unlock your personalized itinerary"}
           </p>
         </div>
 
       </div>
 
-      {/* ── Generating Overlay ─────────────────────────────────────────────── */}
+      {/* Generating Overlay */}
       {generatingTrip && (
         <div className="fixed inset-0 z-[10000] flex flex-col items-center justify-center bg-slate-900/60 backdrop-blur-sm">
           <div className="bg-white rounded-3xl shadow-2xl px-10 py-10 flex flex-col items-center gap-5 w-full max-w-xs mx-4"
             style={{ animation: "fadeUp 0.2s ease" }}>
-
-            {/* Animated plane */}
             <div className="relative w-20 h-20">
               <div className="w-20 h-20 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center">
                 <span className="text-4xl" style={{ animation: "planeBounce 1.2s ease-in-out infinite" }}>✈️</span>
               </div>
-              {/* Orbit ring */}
-              <div className="absolute inset-0 rounded-full border-2 border-blue-300 border-dashed"
-                style={{ animation: "spin 3s linear infinite" }} />
+              <div className="absolute inset-0 rounded-full border-2 border-blue-300 border-dashed" style={{ animation: "spin 3s linear infinite" }} />
             </div>
-
             <div className="text-center">
               <p className="text-base font-bold text-slate-800 mb-1">Building your trip</p>
               <p className="text-sm text-blue-600 font-medium">{generatingStep}</p>
             </div>
-
-            {/* Progress dots */}
             <div className="flex gap-1.5">
               {[0, 1, 2].map((i) => (
-                <span
-                  key={i}
-                  className="w-2 h-2 rounded-full bg-blue-400"
-                  style={{ animation: `dotPulse 1.2s ease-in-out ${i * 0.2}s infinite` }}
-                />
+                <span key={i} className="w-2 h-2 rounded-full bg-blue-400"
+                  style={{ animation: `dotPulse 1.2s ease-in-out ${i * 0.2}s infinite` }} />
               ))}
             </div>
-
-            {/* Trip summary pill */}
             <div className="flex flex-wrap justify-center gap-2 mt-1">
               {[
                 { icon: "📍", text: selectedDest?.short },
@@ -683,13 +656,10 @@ const CreateTrip = () => {
         </div>
       )}
 
-      {/* Google Sign-In Dialog */}
+      {/* Sign-In Dialog — shows both options */}
       {openDialog && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
-          <div
-            className="absolute inset-0 bg-slate-900 bg-opacity-40 backdrop-blur-sm"
-            onClick={() => setOpenDialog(false)}
-          />
+          <div className="absolute inset-0 bg-slate-900 bg-opacity-40 backdrop-blur-sm" onClick={() => setOpenDialog(false)} />
           <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8 flex flex-col items-center gap-5"
             style={{ animation: "fadeUp 0.25s ease" }}>
 
@@ -698,9 +668,7 @@ const CreateTrip = () => {
               className="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors text-lg leading-none"
             >×</button>
 
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center text-3xl">
-              ✈️
-            </div>
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center text-3xl">✈️</div>
 
             <div className="text-center">
               <h2 className="text-xl font-bold text-slate-900 mb-1.5">Sign in to continue</h2>
@@ -709,11 +677,11 @@ const CreateTrip = () => {
               </p>
             </div>
 
+            {/* Google login */}
             <button
               onClick={() => googleLogin()}
               className="w-full flex items-center justify-center gap-3 py-3.5 px-5 rounded-2xl border-2 border-slate-200
-                bg-white hover:bg-slate-50 hover:border-blue-300 hover:shadow-md
-                transition-all duration-200 group"
+                bg-white hover:bg-slate-50 hover:border-blue-300 hover:shadow-md transition-all duration-200 group"
             >
               <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -721,9 +689,26 @@ const CreateTrip = () => {
                 <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
                 <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
               </svg>
-              <span className="text-sm font-semibold text-slate-700 group-hover:text-blue-700 transition-colors">
-                Continue with Google
-              </span>
+              <span className="text-sm font-semibold text-slate-700 group-hover:text-blue-700 transition-colors">Continue with Google</span>
+            </button>
+
+            {/* Divider */}
+            <div className="w-full flex items-center gap-3">
+              <div className="flex-1 h-px bg-slate-200" />
+              <span className="text-xs text-slate-400 font-medium">or</span>
+              <div className="flex-1 h-px bg-slate-200" />
+            </div>
+
+            {/* Manual login/signup redirect */}
+            <button
+              onClick={() => { setOpenDialog(false); navigate("/login"); }}
+              className="w-full flex items-center justify-center gap-2 py-3.5 px-5 rounded-2xl border-2 border-slate-200
+                bg-white hover:bg-blue-50 hover:border-blue-400 hover:shadow-md transition-all duration-200 group"
+            >
+              <svg className="w-5 h-5 text-slate-400 group-hover:text-blue-600 transition-colors flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+              <span className="text-sm font-semibold text-slate-700 group-hover:text-blue-700 transition-colors">Login / Sign up with Email</span>
             </button>
 
             <p className="text-xs text-slate-400 text-center">
@@ -738,9 +723,7 @@ const CreateTrip = () => {
           from { opacity: 0; transform: translateY(16px) scale(0.97); }
           to   { opacity: 1; transform: translateY(0) scale(1); }
         }
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
+        @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes planeBounce {
           0%, 100% { transform: translateY(0) rotate(0deg); }
           50%       { transform: translateY(-6px) rotate(5deg); }
@@ -751,25 +734,18 @@ const CreateTrip = () => {
         }
         input[type=range]::-webkit-slider-thumb {
           -webkit-appearance: none;
-          width: 22px; height: 22px;
-          border-radius: 50%;
-          background: #2563eb;
-          border: 3px solid white;
+          width: 22px; height: 22px; border-radius: 50%;
+          background: #2563eb; border: 3px solid white;
           box-shadow: 0 2px 8px rgba(37,99,235,0.4);
-          cursor: pointer;
-          transition: box-shadow 0.2s, transform 0.2s;
+          cursor: pointer; transition: box-shadow 0.2s, transform 0.2s;
         }
         input[type=range]::-webkit-slider-thumb:hover {
-          box-shadow: 0 2px 14px rgba(37,99,235,0.5);
-          transform: scale(1.1);
+          box-shadow: 0 2px 14px rgba(37,99,235,0.5); transform: scale(1.1);
         }
         input[type=range]::-moz-range-thumb {
-          width: 22px; height: 22px;
-          border-radius: 50%;
-          background: #2563eb;
-          border: 3px solid white;
-          box-shadow: 0 2px 8px rgba(37,99,235,0.4);
-          cursor: pointer;
+          width: 22px; height: 22px; border-radius: 50%;
+          background: #2563eb; border: 3px solid white;
+          box-shadow: 0 2px 8px rgba(37,99,235,0.4); cursor: pointer;
         }
       `}</style>
     </div>

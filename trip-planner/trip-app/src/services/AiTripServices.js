@@ -2,27 +2,51 @@ import axios from "axios";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
-/**
- * Calls the Node.js backend to generate a travel plan via Gemini.
- *
- * @param {Object}  params
- * @param {{ name: string, short: string, country: string, lat: number, lon: number }} params.destination
- * @param {"cheap"|"moderate"|"luxury"}                params.budget
- * @param {"solo"|"couple"|"family"|"friends"}        params.travelers
- * @param {number}                                     params.days  (1–14)
- * @param {Object}                                     params.userProfile
- *
- * @returns {Promise<{ tripId: string, hotels: Array, itinerary: Array }>}
- */
 export async function generateTravelPlan({ destination, budget, travelers, days, userProfile }) {
   try {
-    const response = await axios.post(`${API_BASE}/api/trip/generate`, {
+    // ── Always send JWT token with every request ──────────────────────────
+    const token = localStorage.getItem("token");
+
+    if (!token) {
+      throw new Error("You must be logged in to generate a trip.");
+    }
+
+    // ── Ensure userProfile always has required fields ─────────────────────
+    const safeProfile = {
+      name:    userProfile?.name    || userProfile?.given_name || "Traveler",
+      email:   userProfile?.email   || "",
+      picture: userProfile?.picture || null,
+      id:      userProfile?.id      || userProfile?.sub || null,
+    };
+
+    if (!safeProfile.name || !safeProfile.email) {
+      throw new Error("User profile is incomplete. Please log in again.");
+    }
+
+    console.log("📤 Sending to backend:", {
       destination,
       budget,
       travelers,
       days,
-      userProfile,
+      userProfile: safeProfile,
     });
+
+    const response = await axios.post(
+      `${API_BASE}/api/trip/generate`,
+      {
+        destination,
+        budget,
+        travelers,
+        days,
+        userProfile: safeProfile,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
 
     if (!response.data.success) {
       throw new Error(response.data.message || "Failed to generate travel plan.");
@@ -32,21 +56,17 @@ export async function generateTravelPlan({ destination, budget, travelers, days,
 
     return {
       tripId: response.data.tripId,
-      ...response.data.data, // hotels[] and itinerary[]
+      ...response.data.data,
     };
 
   } catch (error) {
-    // Normalize error message for the UI:
-    // 1. Backend responded with an error status (4xx / 5xx)
-    // 2. Request was made but no response received (network down)
-    // 3. Something else (setup error, etc.)
     const message =
-      error?.response?.data?.message ||   // backend error body
-      error?.message                  ||   // axios / JS error
+      error?.response?.data?.message ||
+      error?.message                  ||
       "Something went wrong. Please try again.";
 
     console.error("❌ Error generating travel plan:", message);
 
-    throw new Error(message); // always throws a plain Error with a clean message
+    throw new Error(message);
   }
 }

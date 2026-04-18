@@ -47,18 +47,16 @@ const TRAVELERS_DISPLAY = {
   friends: { label: "Friends", icon: "🧑‍🤝‍🧑" },
 };
 
-// ── HotelsTab with cancelled flag ─────────────────────────────────────────────
+// ── HotelsTab ─────────────────────────────────────────────────────────────────
 const HotelsTab = ({ hotels, destination }) => {
   const [hotelImages, setHotelImages] = useState({});
 
   useEffect(() => {
     if (!hotels.length) return;
-
-    let cancelled = false; // ← prevents Strict Mode double-fire race condition
+    let cancelled = false;
 
     hotels.forEach((hotel, idx) => {
       const query = `${hotel.name} ${destination?.short || destination?.name || ""}`.trim();
-
       fetchPexelsImage(query, idx).then((url) => {
         if (!cancelled && url) {
           setHotelImages((prev) => ({ ...prev, [idx]: url }));
@@ -104,6 +102,7 @@ const ViewTrips = () => {
   const [trip, setTrip]           = useState(null);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState(null);
+  const [isAuthError, setIsAuthError] = useState(false);
   const [activeTab, setActiveTab] = useState("itinerary");
   const [mounted, setMounted]     = useState(false);
 
@@ -115,18 +114,46 @@ const ViewTrips = () => {
   const fetchTrip = async () => {
     setLoading(true);
     setError(null);
+    setIsAuthError(false);
+
+    // ── Get JWT token from localStorage ──────────────────────────────────
+    // Works for both manual login (JWT) and Google login (access_token)
+    const token = localStorage.getItem("token");
+
+    if (!token) {
+      setIsAuthError(true);
+      setLoading(false);
+      return;
+    }
+
     try {
-      const res = await axios.get(`${API_BASE}/api/trip/view-trip/${tripId}`);
+      const res = await axios.get(`${API_BASE}/api/trip/view-trip/${tripId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,  // ← send token with every request
+        },
+      });
       setTrip(res.data);
       setTimeout(() => setMounted(true), 80);
     } catch (err) {
       console.error("Error fetching trip:", err);
-      setError(err?.response?.data?.message || "Failed to load trip. Please try again.");
+
+      // ── Handle 401 specifically ───────────────────────────────────────
+      if (err?.response?.status === 401) {
+        // Token expired or invalid — clear session and prompt re-login
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+        localStorage.removeItem("userProfile");
+        window.dispatchEvent(new Event("storage")); // sync Navbar instantly
+        setIsAuthError(true);
+      } else {
+        setError(err?.response?.data?.message || "Failed to load trip. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
   };
 
+  // ── Loading state ─────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100">
@@ -139,6 +166,45 @@ const ViewTrips = () => {
     );
   }
 
+  // ── Auth error state (no token or 401) ───────────────────────────────────
+  if (isAuthError) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex items-center justify-center px-5">
+        <div className="bg-white/80 backdrop-blur-md border border-blue-100 rounded-3xl p-10 max-w-md w-full text-center shadow-xl"
+          style={{ animation: "fadeUp 0.3s ease" }}>
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center text-3xl mx-auto mb-5">
+            🔐
+          </div>
+          <h2 className="text-xl font-bold text-slate-800 mb-2">Sign in to view this trip</h2>
+          <p className="text-sm text-slate-500 mb-6">
+            Your session has expired or you're not logged in. Please sign in to access your trip itinerary.
+          </p>
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={() => navigate("/login")}
+              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-md shadow-blue-200"
+            >
+              Sign in
+            </button>
+            <button
+              onClick={() => navigate("/create-trip")}
+              className="px-5 py-2.5 border border-slate-200 hover:border-blue-300 text-slate-600 text-sm font-semibold rounded-xl transition-colors"
+            >
+              New Trip
+            </button>
+          </div>
+        </div>
+        <style>{`
+          @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(16px) scale(0.97); }
+            to   { opacity: 1; transform: translateY(0) scale(1); }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  // ── General error state ───────────────────────────────────────────────────
   if (error) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex items-center justify-center px-5">
